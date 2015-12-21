@@ -1,12 +1,13 @@
 /*
- * OneWire.c
+ * Пример работы по протоколу OneWire
+ * В примере ведется работа с утройством iButton - популярный электронный ключ.
+ * Программа читает серийный номер ключа и пишет его в UART (baud: 9600, stop_bits: 1, parity: none)
+ * Для правильной работы UART контроллер должен быть запущен на 16 мгц
  *
- * Проект, демонстрирующий работу с 1-wire сетью в режиме "мастера".
- * Реализует опрос датчиков температуры DS18B20, DS18S20, DS1822
+ * Для работы программы необходимо подключить iButton аналогично схеме из папки schematic проекта,
+ * (или сконфигурировать свой пин в блоке макросов ниже)
  *
- * Author: Погребняк Дмитрий, г. Самара, 2013
- *
- * Помещённый здесь код является свободным. Т.е. допускается его свободное использование для любых целей, включая коммерческие, при условии указания ссылки на автора (Погребняк Дмитрий, http://aterlux.ru/).
+ * Код основан на примере http://aterlux.ru/index.php?page=article&art=1wire авторства Погребняка Дмитрия
  */
 
 
@@ -17,10 +18,10 @@
 #include <avr/io.h>
 #include <util/delay.h>
 
-#define ONEWIRE_PORT PORTD
-#define ONEWIRE_DDR DDRD
-#define ONEWIRE_PIN PIND
-#define ONEWIRE_PIN_NUM PD2
+#define ONEWIRE_PORT PORTD  // регистр PORT используемого вывода
+#define ONEWIRE_DDR DDRD    // регистр DDR используемого вывода
+#define ONEWIRE_PIN PIND    // регистр PIN используемого вывода
+#define ONEWIRE_PIN_NUM PD4 // номер вывода в порту
 
 // Устанавливает низкий уровень на шине 1-wire
 inline void onewire_setBusLow() {
@@ -49,7 +50,7 @@ uint8_t onewire_reset()
 	_delay_us(60); // Ждём не менее 60 мс до появления импульса присутствия;
 
 	if (!onewire_readBus()) {
-			// Если обнаружен импульс присутствия, ждём его окончания
+		// Если обнаружен импульс присутствия, ждём его окончания
 		while (!onewire_readBus()) {
 			// Ждём конца сигнала присутствия
 		}
@@ -79,8 +80,7 @@ void onewire_send_bit(uint8_t bit) {
 }
 
 
-// Отправляет один байт, восемь подряд бит, младший бит вперёд
-// b - отправляемое значение
+// отправляет dataSize байт на шину из буффера data
 void onewire_send(const void * data, uint8_t dataSize) {
 
 	for (uint8_t i = 0; i < dataSize; i++)
@@ -110,7 +110,7 @@ bool onewire_readBit() {
 }
 
 
-// Читает один байт, переданный устройством, младший бит вперёд, возвращает прочитанное значение
+// Читает dataSize байт, переданный устройством (младший бит вперёд) в буффер data
 void onewire_read(void * data, uint8_t dataSize) {
 	for (uint8_t i = 0; i < dataSize; i++) {
 
@@ -127,16 +127,14 @@ void onewire_read(void * data, uint8_t dataSize) {
 }
 
 
-// Инициалазция UART0 для передачи данных с АЦП в терминал
-void initUart();
-// передача строки в uart
-void uartWrite(const char * message);
+
+void initStdios();
 
 
 int main(void)
 {
-	// Инициализация UART
-	initUart();
+	// Инициализация printf
+	initStdios();
 
 	// Инициализация шины oneWire
 	ONEWIRE_PORT &= (1 << ONEWIRE_PIN_NUM);
@@ -146,33 +144,43 @@ int main(void)
 	for ( ; ; _delay_ms(1000))
 	{
 		if (!onewire_reset()) {
-			uartWrite("No one at the bus\r\n");
+			printf("No one at the bus\r\n");
 			continue; // если никого на линии не оказалось - пропускаем эту итерацию
 		}
 
-		uint8_t command = 0xCC; // команда активации всех устройств на шине (у нас оно одно)
-		//onewire_send(&command, 1);
-		command = 0x33; // команда на чтение ROM устроства
+		uint8_t command = 0x33; // команда на чтение ROM устроства
 		onewire_send(&command, 1);
 
 		// буфер для хранения ROM устройства
-		uint8_t slaveDeviceData[8] = {'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a'};
+		uint8_t slaveDeviceData[8] = {0x00};
 		onewire_read(slaveDeviceData, sizeof(slaveDeviceData));
-		uartWrite("deviceData: ");
-		char buffer[100] = {0x00};
-		sprintf(buffer, "%02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X\r\n",
+
+		printf("deviceData: %02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X\r\n",
 				slaveDeviceData[0], slaveDeviceData[1], slaveDeviceData[2], slaveDeviceData[3],
 				slaveDeviceData[4], slaveDeviceData[5], slaveDeviceData[6], slaveDeviceData[7]
 		);
-		uartWrite(buffer);
 	}
 }
 
 
 
+int customPutChar(char value, FILE * stream) {
+	(void)stream;
+
+	while (!(UCSR0A & (1 << UDRE0))) // ждем, пока предыущий байт не покинет буфер
+	{}
+
+	UDR0 = value; // передаем текущий байт в буффер
+	return 0; // нет ошибки
+}
+
+FILE custom_stdout = FDEV_SETUP_STREAM(customPutChar, NULL, _FDEV_SETUP_WRITE);
+
+// инициализация STDOUT в UART0
 // baud rate 9600; parity: none; stop bits: one
 // подразумевается, что контроллер запущен на 16 МГЦ
-void initUart() {
+void initStdios() {
+	// инициализация UART
 	UCSR0B = (1 << TXEN0)  // включаем только TX
 	;
 	UCSR0C = (1 << UCSZ00) | (1 << UCSZ01) // Размер символа - 8 бит
@@ -183,16 +191,8 @@ void initUart() {
 	// baud на 9600 по таблице на частоте в 16мгц
 	UBRR0H = 103 / 0xFF;
 	UBRR0L = 103 % 0xFF;
-}
 
-// передача c строки в uart
-void uartWrite(const char * message) {
-	// цикл по каждому байту сообщений message, пока не встретим нулевой, что будет означать конец сообщения
-	for ( ; *message != 0; message++) {
-		while (!(UCSR0A & (1 << UDRE0))) // ждем, пока предыущий байт не покинет буфер
-		{}
-
-		UDR0 = *message; // передаем текущий байт в буффер
-	}
+	// инициализция STDOUT
+	stdout = &custom_stdout;
 }
 
