@@ -29,7 +29,8 @@ volatile uint16_t adcBufferCarret = 0;
 ISR(ADC_vect) {
 	// если буффер измерений полон - выбрасываем текущее измерение, его некуда деть. Заканчиваем обработку прерывания
 	if (adcBufferCarret >= ADC_VALUES_BUFFER_SIZE) {
-		//volatile uint16_t adcw = ADCW;
+		volatile uint16_t adcw = ADCW;
+		(void)adcw; // глушим варнинг о неиспользуемой переменной
 		return;
 	}
 
@@ -84,9 +85,7 @@ int main() {
 
 		if (adcBufferCarretSnapshot < ADC_VALUES_BUFFER_SIZE) {
 			// буффер еще не заполнен, тут можно усыпить контроллер или заняться другими полезными вещами, пока он заполняется
-			char buffer[50] = { 0x00 };
-			sprintf(buffer, "buffer underflow: %d\r\n", adcBufferCarretSnapshot); // пишем сколько значений в буфере есть
-			uartWrite(buffer);
+			printf("buffer underflow: %d\r\n", adcBufferCarretSnapshot); // пишем сколько значений в буфере есть
 			continue;
 		}
 
