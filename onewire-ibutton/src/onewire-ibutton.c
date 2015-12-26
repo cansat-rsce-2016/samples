@@ -127,14 +127,12 @@ void onewire_read(void * data, uint8_t dataSize) {
 }
 
 
-
-void initStdios();
-
+void initUartStdio();
 
 int main(void)
 {
 	// Инициализация printf
-	initStdios();
+	initUartStdio();
 
 	// Инициализация шины oneWire
 	ONEWIRE_PORT &= (1 << ONEWIRE_PIN_NUM);
@@ -163,25 +161,31 @@ int main(void)
 }
 
 
+static int myPutChar(char value, FILE * stream) {
+	(void)stream; // не используем переменную. Таким образом глушим варнинг о неиспользуемой переменной
 
-int customPutChar(char value, FILE * stream) {
-	(void)stream;
-
-	while (!(UCSR0A & (1 << UDRE0))) // ждем, пока предыущий байт не покинет буфер
+	while ( !(UCSR0A & (1 << UDRE0)) )
 	{}
 
-	UDR0 = value; // передаем текущий байт в буффер
-	return 0; // нет ошибки
+	UDR0 = value;
+	return 0;
 }
 
-FILE custom_stdout = FDEV_SETUP_STREAM(customPutChar, NULL, _FDEV_SETUP_WRITE);
+static int myGetChar(FILE * stream) {
+	(void)stream; // не используем переменную. Таким образом глушим варнинг о неиспользуемой переменной
 
-// инициализация STDOUT в UART0
-// baud rate 9600; parity: none; stop bits: one
-// подразумевается, что контроллер запущен на 16 МГЦ
-void initStdios() {
-	// инициализация UART
-	UCSR0B = (1 << TXEN0)  // включаем только TX
+	while ( !(UCSR0A & (1 << RXC0)) )
+	{}
+
+	return UDR0;
+}
+
+// глобальная переменная stdout
+FILE mystdout = FDEV_SETUP_STREAM(myPutChar, NULL, _FDEV_SETUP_WRITE);
+FILE mystdin = FDEV_SETUP_STREAM(NULL, myGetChar, _FDEV_SETUP_READ);
+
+void initUartStdio() {
+	UCSR0B = (1 << TXEN0) | (1 << RXEN0); // включаем TX RX
 	;
 	UCSR0C = (1 << UCSZ00) | (1 << UCSZ01) // Размер символа - 8 бит
 		| (0 << UPM00) | (0 << UPM01)      // Бит чертности отключен
@@ -192,7 +196,7 @@ void initStdios() {
 	UBRR0H = 103 / 0xFF;
 	UBRR0L = 103 % 0xFF;
 
-	// инициализция STDOUT
-	stdout = &custom_stdout;
+	stdout = &mystdout;
+	stdin = &mystdin;
 }
 

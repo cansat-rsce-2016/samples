@@ -10,12 +10,12 @@
 
 #include <avr/io.h>
 
-
+void initUartStdio();
 
 int main() {
 	// инициализируем UART для передачи значений, полученных с АЦП на компьютер
 	// ==================================================
-	initUart();
+	initUartStdio();
 
 	// Конфигурируем АЦП
 	// =============================
@@ -50,9 +50,7 @@ int main() {
 		uint16_t adcValueBuffer = high << 8 | low;
 
 		// формируем текстовое сообщение комьпютеру
-		char buffer[100] = {0x00}; // инициализируем буффер нулями, чтобы конец сообщения был четко определим
-		sprintf(buffer, "ADC_VALUE: 0x%04X\r\n", adcValueBuffer);
-		uartWrite(buffer);
+		printf("ADC_VALUE: 0x%04X\r\n", adcValueBuffer);
 	}
 
 	return 0;
@@ -61,11 +59,32 @@ int main() {
 
 
 
-// Инициалазция UART0 для передачи данных с АЦП в терминал
-// baud rate 9600; parity: none; stop bits: one
-// подразумевается, что контроллер запущен на 16 МГЦ
-void initUart() {
-	UCSR0B = (1 << TXEN0)  // включаем только TX
+static int myPutChar(char value, FILE * stream) {
+	(void)stream; // не используем переменную. Таким образом глушим варнинг о неиспользуемой переменной
+
+	while ( !(UCSR0A & (1 << UDRE0)) )
+	{}
+
+	UDR0 = value;
+	return 0;
+}
+
+static int myGetChar(FILE * stream) {
+	(void)stream; // не используем переменную. Таким образом глушим варнинг о неиспользуемой переменной
+
+	while ( !(UCSR0A & (1 << RXC0)) )
+	{}
+
+	return UDR0;
+}
+
+
+// глобальная переменная stdout
+FILE mystdout = FDEV_SETUP_STREAM(myPutChar, NULL, _FDEV_SETUP_WRITE);
+FILE mystdin = FDEV_SETUP_STREAM(NULL, myGetChar, _FDEV_SETUP_READ);
+
+void initUartStdio() {
+	UCSR0B = (1 << TXEN0) | (1 << RXEN0); // включаем TX RX
 	;
 	UCSR0C = (1 << UCSZ00) | (1 << UCSZ01) // Размер символа - 8 бит
 		| (0 << UPM00) | (0 << UPM01)      // Бит чертности отключен
@@ -75,16 +94,7 @@ void initUart() {
 	// baud на 9600 по таблице на частоте в 16мгц
 	UBRR0H = 103 / 0xFF;
 	UBRR0L = 103 % 0xFF;
+
+	stdout = &mystdout;
+	stdin = &mystdin;
 }
-
-// передача c строки в uart
-void uartWrite(const char * message) {
-	// цикл по каждому байту сообщений message, пока не встретим нулевой, что будет означать конец сообщения
-	for ( ; *message != 0; message++) {
-		while (!(UCSR0A & (1 << UDRE0))) // ждем, пока предыущий байт не покинет буфер
-		{}
-
-		UDR0 = *message; // передаем текущий байт в буффер
-	}
-}
-
