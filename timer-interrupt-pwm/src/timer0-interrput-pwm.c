@@ -8,6 +8,7 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
+#include <util/atomic.h>
 
 #define PWMA_DDR_REG  DDRC
 #define PWMA_PORT_REG PORTC
@@ -60,8 +61,10 @@ int main() {
 
 	while(1){
 		// делаем что-нибудь полезное, например меняем значения OCR
-		OCR0A += 1;
-		OCR0B -= 1;
+		ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+			OCR0A += 1;
+			OCR0B -= 1;
+		}
 		_delay_ms(2);
 	}
 
